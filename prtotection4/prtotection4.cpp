@@ -213,16 +213,16 @@ static uint32_t __Keys32b[18] = {
     0x082efa98, 0xec4e6c89, 0x452821e6, 0x38d01377, 0xbe5466cf, 0x34e90c6c,
     0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5, 0xb5470917, 0x9216d5d9, 0x8979fb1b,
 };
-
+ // по Брюсу Шнаеру
 int main(void) {
     uint8_t encrypted[BUFF_SIZE], decrypted[BUFF_SIZE];
     uint8_t buffer[BUFF_SIZE];
-    uint8_t key64b[56] = "This is a crypto blowfish 448 bits key and 64 bits text!";
+    uint8_t key64b[56] = "This is a crypto blowfish 448 bits key and 64 bits text!"; // изначальный ключ 448 бит (56 байт)
 
     size_t length = input_string(buffer);
     print_array(buffer, length);
 
-    key_extension(__Keys32b, key64b, 448);
+    key_extension(__Keys32b, key64b, 448); // расширение нашего ключа чтобы он превратился в ключ 576бит ,__Keys32b - наши ключи для шифрования ключа
 
     length = blowfish(encrypted, 'E', __Keys32b, buffer, length);
     print_array(encrypted, length);
@@ -234,38 +234,39 @@ int main(void) {
 }
 
 void key_extension(uint32_t* keys32b, uint8_t* keyNb, uint16_t len_bits) {
-    const uint8_t block_size_in_bytes = len_bits / 8;
-    for (uint8_t i = 0; i < 18; ++i) {
+    const uint8_t block_size_in_bytes = len_bits / 8; // вычисляем размер блока в байтах
+    for (uint8_t i = 0; i < 18; ++i) {            // из нашего ключа берем по 4 байта, соединяем их в один 32битный блок и делаем xor последовательно  с блоками __Keys32b
         keys32b[i] ^= join_8bits_to_32bits(
             keyNb + ((i * 4) % block_size_in_bytes)
         );
     }
-    uint8_t init_blocks8b[8] = { 0 };
+    uint8_t init_blocks8b[8] = { 0 };  // создаем инициализирующий 64битный блок
+
     for (uint8_t i = 0; i < 18; i += 2) {
-        blowfish(init_blocks8b, 'E', keys32b, init_blocks8b, 8);
-        keys32b[i] = join_8bits_to_32bits(init_blocks8b);
-        keys32b[i + 1] = join_8bits_to_32bits(init_blocks8b + 4);
+        blowfish(init_blocks8b, 'E', keys32b, init_blocks8b, 8); // шифруем наш новый блок с помощью новых ключей
+        keys32b[i] = join_8bits_to_32bits(init_blocks8b); // складываем первые 4 байта и помещаем в ключи
+        keys32b[i + 1] = join_8bits_to_32bits(init_blocks8b + 4); // складываем вторые 4 байта и помещаем в ключи
     }
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < 4; ++i) {  // теперь надо забить все s блоки
         for (uint16_t j = 0; j < 256; j += 2) {
-            blowfish(init_blocks8b, 'E', keys32b, init_blocks8b, 8);
-            __Sbox[i][j] = join_8bits_to_32bits(init_blocks8b);
+            blowfish(init_blocks8b, 'E', keys32b, init_blocks8b, 8); // шифруем еще раз наш уже зашифрованный блок с помощью новых ключей
+            __Sbox[i][j] = join_8bits_to_32bits(init_blocks8b); // делим полученное пополам на 32 бита и записываем в s блок
             __Sbox[i][j + 1] = join_8bits_to_32bits(init_blocks8b + 4);
         }
     }
 }
 
 size_t blowfish(uint8_t* to, uint8_t mode, uint32_t* keys32b, uint8_t* from, size_t length) {
-    length = length % 8 == 0 ? length : length + (8 - (length % 8));
-    uint32_t N1, N2;
+    length = length % 8 == 0 ? length : length + (8 - (length % 8)); // вычисляем кратность блока
+    uint32_t N1, N2; //создаем 2 блока по 32 бита
 
     for (size_t i = 0; i < length; i += 8) {
-        split_64bits_to_32bits(
+        split_64bits_to_32bits(  // конкатенируем наш введенный векторв в строку 64 бита и разбиваем ее на 2 блока
             join_8bits_to_64bits(from + i),
             &N1, &N2
         );
-        feistel_cipher(mode, &N1, &N2, keys32b);
-        split_64bits_to_8bits(
+        feistel_cipher(mode, &N1, &N2, keys32b); 
+        split_64bits_to_8bits(   
             join_32bits_to_64bits(N1, N2),
             (to + i)
         );
@@ -277,16 +278,16 @@ size_t blowfish(uint8_t* to, uint8_t mode, uint32_t* keys32b, uint8_t* from, siz
 void feistel_cipher(uint8_t mode, uint32_t* N1, uint32_t* N2, uint32_t* keys32b) {
     switch (mode) {
     case 'E': case 'e': {
-        for (int8_t round = 0; round < 16; ++round) {
+        for (int8_t round = 0; round < 16; ++round) { // шифруем блоки в 16 раундов
             round_of_feistel_cipher(N1, N2, keys32b[round]);
         }
-        swap(N1, N2);
-        *N2 ^= keys32b[16];
+        swap(N1, N2); // тк функция round_of_feistel_cipher меняем блоки местами
+        *N2 ^= keys32b[16];// в конце xor наши блоки
         *N1 ^= keys32b[17];
         break;
     }
     case 'D': case 'd': {
-        for (int8_t round = 17; round > 1; --round) {
+        for (int8_t round = 17; round > 1; --round) {  // начинаем с 17 раунда и идем вверх
             round_of_feistel_cipher(N1, N2, keys32b[round]);
         }
         swap(N1, N2);
@@ -297,7 +298,7 @@ void feistel_cipher(uint8_t mode, uint32_t* N1, uint32_t* N2, uint32_t* keys32b)
     }
 }
 
-void round_of_feistel_cipher(uint32_t* N1, uint32_t* N2, uint32_t key32b) {
+void round_of_feistel_cipher(uint32_t* N1, uint32_t* N2, uint32_t key32b) { // берем 32ьит блок, xor с ключом и проводим через функцию F, делаем xor со вторым блоком и меняем местами
     uint32_t temp;
     *N1 ^= key32b;
     temp = *N1;
@@ -308,8 +309,8 @@ void round_of_feistel_cipher(uint32_t* N1, uint32_t* N2, uint32_t key32b) {
 
 uint32_t func_F(uint32_t block32b) {
     uint8_t blocks8b[4];
-    split_32bits_to_8bits(block32b, blocks8b);
-    block32b = __Sbox[0][blocks8b[0]];
+    split_32bits_to_8bits(block32b, blocks8b);  // создаем  8 бит блоки, разделяем наш блок на 4 блока и пишем в них
+    block32b = __Sbox[0][blocks8b[0]]; // прогоняем наш блок через s блок
     block32b += __Sbox[1][blocks8b[1]];
     block32b ^= __Sbox[2][blocks8b[2]];
     block32b += __Sbox[3][blocks8b[3]];
